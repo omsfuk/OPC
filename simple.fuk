@@ -1,0 +1,14 @@
+var a, b;
+procedure p;
+begin
+    if a#0 then
+    begin
+        a := a - 1;
+        call p;
+    end;
+end;
+begin
+    a := 5;
+    call p;
+    write(a);
+end.
