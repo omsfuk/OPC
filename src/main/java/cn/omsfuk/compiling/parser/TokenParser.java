@@ -1,4 +1,4 @@
-package cn.omsfuk.compiling.analyzer;
+package cn.omsfuk.compiling.parser;
 
 import cn.omsfuk.compiling.support.Symbol;
 import cn.omsfuk.compiling.support.Token;
@@ -15,7 +15,7 @@ import static cn.omsfuk.compiling.support.Symbol.*;
 /**
  * 词法分析器。不适合用面向对象的方式来编程
  */
-public class TokenAnalyzer {
+public class TokenParser {
 
     private List<String> constants = new ArrayList<>();
 
@@ -56,7 +56,7 @@ public class TokenAnalyzer {
      */
     private int col;
 
-    public TokenAnalyzer(InputStream source) throws IOException {
+    public TokenParser(InputStream source) throws IOException {
         this.source = new BufferedInputStream(source);
         nextChar();
     }
@@ -93,58 +93,58 @@ public class TokenAnalyzer {
             int slot = constants.indexOf(rawToken);
             ans = new Token(SYM_NUMBER, rawToken, slot, row, start);
         } else if (ch == ',') {
-            ans =  new Token(SYM_COMMA, row, col);
+            ans =  new Token(SYM_COMMA, ",", 0, row, col);
             nextChar();
         } else if (ch == '.') {
-            ans = new Token(SYM_PERIOD, row, col);
+            ans = new Token(SYM_PERIOD, ".", 0, row, col);
             nextChar();
         } else if (ch == '(') {
-            ans = new Token(SYM_LEFT_BRACKETS, row, col);
+            ans = new Token(SYM_LEFT_BRACKETS, "(", 0, row, col);
             nextChar();
         } else if (ch == ')') {
-            ans = new Token(SYM_RIGHT_BRACKETS, row, col);
+            ans = new Token(SYM_RIGHT_BRACKETS, ")", 0, row, col);
             nextChar();
         } else if (ch == ';') {
-            ans = new Token(SYM_SEMICOLON, row, col);
+            ans = new Token(SYM_SEMICOLON, ";", 0, row, col);
             nextChar();
         } else if (ch == '+') {
-            ans = new Token(SYM_PLUS, row, col);
+            ans = new Token(SYM_PLUS, "+", 0, row, col);
             nextChar();
         } else if (ch == '-') {
-            ans = new Token(SYM_SUB, row, col);
+            ans = new Token(SYM_SUB, "-", 0, row, col);
             nextChar();
         } else if (ch == '*') {
-            ans = new Token(SYM_MUL, row, col);
+            ans = new Token(SYM_MUL, "*", 0, row, col);
             nextChar();
         } else if (ch == '/') {
-            ans = new Token(SYM_DIV, row, col);
+            ans = new Token(SYM_DIV, "/", 0, row, col);
             nextChar();
         } else if (ch == '#') {
-            ans = new Token(SYM_POUND, row, col);
+            ans = new Token(SYM_POUND, "#", 0, row, col);
             nextChar();
         } else if (ch == '=') {
-            ans = new Token(SYM_EQUAL, row, col);
+            ans = new Token(SYM_EQUAL, "=", 0, row, col);
             nextChar();
         } else if (ch == '<') {
             nextChar();
             if (ch == '=') {
-                ans = new Token(SYM_LESS_EQUAL, row, col - 1);
+                ans = new Token(SYM_LESS_EQUAL, "<=", 0, row, col - 1);
                 nextChar();
             } else {
-                ans = new Token(SYM_EQUAL, row, col - 1);
+                ans = new Token(SYM_EQUAL, "=", 0, row, col - 1);
             }
         } else if (ch == '>') {
             nextChar();
             if (ch == '=') {
-                ans = new Token(SYM_GREATER_EQUAL, row, col - 1);
+                ans = new Token(SYM_GREATER_EQUAL, ">=", 0, row, col - 1);
                 nextChar();
             } else {
-                ans = new Token(SYM_GREATER, row, col - 1);
+                ans = new Token(SYM_GREATER, ">", 0, row, col - 1);
             }
         } else if (ch == ':') {
             nextChar();
             if (ch == '=') {
-                ans = new Token(SYM_ASSIGN, row, col - 1);
+                ans = new Token(SYM_ASSIGN, ":=", 0, row, col - 1);
                 nextChar();
             } else {
                 throw new SyntaxErrorException(String.format("Syntax error in (%d, %d)", row, col));
@@ -173,7 +173,7 @@ public class TokenAnalyzer {
     }
 
     public static void main(String[] args) throws IOException, SyntaxErrorException {
-        TokenAnalyzer analyzer = new TokenAnalyzer(new FileInputStream("simple.fuk"));
+        TokenParser analyzer = new TokenParser(new FileInputStream("simple.ofk"));
         Token token;
         while ((token = analyzer.nextToken()) != null) {
             System.out.println(token);

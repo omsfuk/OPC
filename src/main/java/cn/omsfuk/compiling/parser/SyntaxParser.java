@@ -1,17 +1,14 @@
-package cn.omsfuk.compiling.analyzer;
+package cn.omsfuk.compiling.parser;
 
 import java.util.*;
 
 import static cn.omsfuk.compiling.support.Instruction.OP.*;
 import static cn.omsfuk.compiling.support.Symbol.*;
 
-import cn.omsfuk.compiling.support.Instruction;
-import cn.omsfuk.compiling.support.RefEntry;
+import cn.omsfuk.compiling.support.*;
 import cn.omsfuk.compiling.support.RefEntry.RefType;
-import cn.omsfuk.compiling.support.Symbol;
-import cn.omsfuk.compiling.support.Token;
 
-public class SyntaxAnalyzer {
+public class SyntaxParser {
 
     private Iterator<Token> tokens;
 
@@ -35,17 +32,19 @@ public class SyntaxAnalyzer {
 
     private boolean findMain; // 用来标示时候已经找到main函数
 
-    private TokenAnalyzer tokenAnalyzer;
+    private TokenParser tokenParser;
 
     private boolean debugEnable;
 
-    public SyntaxAnalyzer(List<Token> tokens) {
+    private Node node = new Node(null);
+
+    public SyntaxParser(List<Token> tokens) {
         this.tokens = tokens.iterator();
         symbolStack.add(SYM_POUND);
     }
 
-    public SyntaxAnalyzer(TokenAnalyzer tokenAnalyzer) {
-        this.tokenAnalyzer = tokenAnalyzer;
+    public SyntaxParser(TokenParser tokenParser) {
+        this.tokenParser = tokenParser;
         symbolStack.add(SYM_POUND);
     }
 
@@ -53,14 +52,14 @@ public class SyntaxAnalyzer {
         this.debugEnable = debugEnable;
     }
 
-    private void advanced() {
+    private void advance() {
         if (tokens == null || tokens.hasNext()) {
             if (inExpression) {
                 enterStack(token);
             }
             if (tokens == null) {
                 try {
-                    token = tokenAnalyzer.nextToken();
+                    token = tokenParser.nextToken();
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
@@ -86,8 +85,12 @@ public class SyntaxAnalyzer {
         return startPointer;
     }
 
-    public boolean analyse() {
-        advanced();
+    public Node getSyntaxTree() {
+        return node;
+    }
+
+    public boolean parse() {
+        advance();
         program();
         if (symbol == null) {
             return true;
@@ -96,13 +99,17 @@ public class SyntaxAnalyzer {
     }
 
     private void program() {
-        subProgram();
+        swap("program");
+        subProgram(null);
         if (!SYM_PERIOD.equals(symbol)) {
+            node.appendChild(new Node("."));
             error();
         }
+        node = node.parent;
     }
 
-    private void subProgram() {
+    private void subProgram(String name) {
+        swap("subProgram");
         boolean isMain = false;
         if (!findMain) {
             isMain = true;
@@ -121,39 +128,58 @@ public class SyntaxAnalyzer {
         if (isMain) {
             startPointer = instructions.size();
         }
+
+        if (name != null) {
+            refTable.get(name).setAdr(instructions.size());
+        }
         putInstruction(new Instruction(INT, 0, oldAdr + 1)); // int 0 adr
         statement();
         putInstruction(new Instruction(OPR, 0, 0)); // int 0 adr
+        node = node.parent;
     }
 
     private void constDesc() {
+        swap("constDesc");
         if (SYM_CONT.equals(symbol)) {
-            advanced();
+            appendChild("const");
+            advance();
             if (SYM_IDENT.equals(symbol)) {
                 constDef();
                 while (SYM_COMMA.equals(symbol)) {
+                    appendChild(",");
+                    advance();
                     constDef();
                 }
             } else {
                 error();
             }
             if (SYM_SEMICOLON.equals(symbol)) {
-                advanced();
+                appendChild(";");
+                advance();
             } else {
                 error();
             }
         }
+        node = node.parent;
     }
 
     private void constDef() {
+        swap("constDef");
         if (SYM_IDENT.equals(symbol)) {
             String constName = token.getId();
-            advanced();
+
+            identity();
+
+            advance();
             if (SYM_EQUAL.equals(symbol)) {
-                advanced();
+                appendChild("=");
+                advance();
                 if (SYM_NUMBER.equals(symbol)) {
                     refTable.put(constName, new RefEntry(constName, RefType.CONST, 0, Integer.parseInt(token.getId())));
-                    advanced();
+
+                    number();
+
+                    advance();
                 } else {
                     error();
                 }
@@ -161,30 +187,38 @@ public class SyntaxAnalyzer {
         } else {
             error();
         }
+        node = node.parent;
     }
 
     private void varDesc() {
+        swap("varDesc");
         if (SYM_VAR.equals(symbol)) {
-            advanced();
+            appendChild("var");
+            advance();
             if (SYM_IDENT.equals(symbol)) {
+                identity();
 
-                // TODO
                 refTable.put(token.getId(), new RefEntry(token.getId(), RefType.VARIABLE, level, ++adr));
 
-                advanced();
+                advance();
                 while (SYM_COMMA.equals(symbol)) {
-                    advanced();
+                    appendChild(",");
+                    advance();
                     if (SYM_IDENT.equals(symbol)) {
-                        // TODO
+
+                        identity();
+
                         refTable.put(token.getId(), new RefEntry(
                                 token.getId(), RefType.VARIABLE, level, ++adr));
-                        advanced();
+
+                        advance();
                     } else {
                         error();
                     }
                 }
                 if (SYM_SEMICOLON.equals(symbol)) {
-                    advanced();
+                    appendChild(";");
+                    advance();
                 } else {
                     error();
                 }
@@ -194,32 +228,46 @@ public class SyntaxAnalyzer {
         } else {
             error();
         }
+        node = node.parent;
     }
 
-    private void procedureDesc() {
-        procedureHeader();
-        subProgram();
+    private String procedureDesc() {
+        swap("procedureDesc");
+        String name = procedureHeader();
+
+        subProgram(name);
+
         level --;
         if (SYM_SEMICOLON.equals(symbol)) {
-            advanced();
+            appendChild(";");
+            advance();
             while (SYM_PROCEDURE.equals(symbol)) {
                 procedureDesc();
             }
+        } else {
+            error();
         }
+        node = node.parent;
+        return name;
     }
 
-    private void procedureHeader() {
+    private String procedureHeader() {
+        swap("procedureHeader");
+        String name = null;
         if (SYM_PROCEDURE.equals(symbol)) {
-
-            advanced();
+            appendChild("procedure");
+            advance();
             if (SYM_IDENT.equals(symbol)) {
+                identity();
 
+                name = token.getId();
                 refTable.put(token.getId(), new RefEntry(token.getId(), RefType.PROCEDURE, level, instructions.size()));
                 adr = 2;
                 level ++;
-                advanced();
+                advance();
                 if (SYM_SEMICOLON.equals(symbol)) {
-                    advanced();
+                    appendChild(";");
+                    advance();
                 } else {
                     error();
                 }
@@ -227,9 +275,12 @@ public class SyntaxAnalyzer {
         } else {
             error();
         }
+        node = node.parent;
+        return name;
     }
 
     private void statement() {
+        swap("statement");
         if (SYM_IDENT.equals(symbol)) {
             assignStatement();
         } else if (SYM_IF.equals(symbol)) {
@@ -244,16 +295,23 @@ public class SyntaxAnalyzer {
             writeStatement();
         } else if (SYM_BEGIN.equals(symbol)) {
             compositeStatement();
+        } else {
+            System.out.println();
         }
+        node = node.parent;
     }
 
     private void assignStatement() {
+        swap("assignStatement");
         if (SYM_IDENT.equals(symbol)) {
+            identity();
+
             assertRef(token, RefType.VARIABLE);
             String varName = token.getId();
-            advanced();
+            advance();
             if (SYM_ASSIGN.equals(symbol)) {
-                advanced();
+                appendChild(":=");
+                advance();
                 inExpression = true;
                 expression();
                 inExpression = false;
@@ -266,28 +324,35 @@ public class SyntaxAnalyzer {
         } else {
             error();
         }
+        node = node.parent;
     }
 
     private void compositeStatement() {
+        swap("compositeStatement");
         if (SYM_BEGIN.equals(symbol)) {
-            advanced();
+            advance();
             if (SYM_IDENT.equals(symbol) || SYM_IF.equals(symbol) || SYM_WHILE.equals(symbol) || SYM_CALL.equals(symbol) ||
                     SYM_READ.equals(symbol) || SYM_WRITE.equals(symbol) || SYM_BEGIN.equals(symbol) || SYM_SEMICOLON.equals(symbol)) {
                 statement();
                 while (SYM_SEMICOLON.equals(symbol)) {
-                    advanced();
-                    statement();
+                    advance();
+                    if (SYM_IDENT.equals(symbol) || SYM_IF.equals(symbol) || SYM_WHILE.equals(symbol) || SYM_CALL.equals(symbol) ||
+                            SYM_READ.equals(symbol) || SYM_WRITE.equals(symbol) || SYM_BEGIN.equals(symbol) || SYM_SEMICOLON.equals(symbol)) {
+                        statement();
+                    }
                 }
             }
             if (SYM_END.equals(symbol)) {
-                advanced();
+                advance();
             } else {
                 error();
             }
         }
+        node = node.parent;
     }
 
     private void condition() {
+        swap("condition");
         // TODO 运算指令生成
         if (SYM_PLUS.equals(symbol) || SYM_SUB.equals(symbol) || SYM_IDENT.equals(symbol) ||
                 SYM_NUMBER.equals(symbol) || SYM_LEFT_BRACKETS.equals(symbol)) {
@@ -297,9 +362,9 @@ public class SyntaxAnalyzer {
             clear();
             if (SYM_EQUAL.equals(symbol) || SYM_POUND.equals(symbol) || SYM_LESS.equals(symbol) || SYM_GREATER.equals(symbol) ||
                     SYM_LESS_EQUAL.equals(symbol) || SYM_GREATER_EQUAL.equals(symbol)) {
-
+                relation();
                 Symbol operator = symbol;
-                advanced();
+                advance();
                 if (SYM_PLUS.equals(symbol) || SYM_SUB.equals(symbol) || SYM_IDENT.equals(symbol) ||
                     SYM_NUMBER.equals(symbol) || SYM_LEFT_BRACKETS.equals(symbol)) {
                     inExpression = true;
@@ -320,7 +385,7 @@ public class SyntaxAnalyzer {
                     } else if (SYM_POUND.equals(operator)) {
                         putInstruction(new Instruction(OPR, 0, 10));
                     } else {
-                        throw new RuntimeException("Unsupported Opearator");
+                        throw new RuntimeException("Unsupported Operator");
                     }
                 } else {
                     error();
@@ -329,7 +394,7 @@ public class SyntaxAnalyzer {
                 error();
             }
         } else if (SYM_ODD.equals(symbol)) {
-            advanced();
+            advance();
             inExpression = true;
             expression();
             inExpression = false;
@@ -338,60 +403,78 @@ public class SyntaxAnalyzer {
         } else {
             error();
         }
+        node = node.parent;
     }
 
     private void expression() {
+        swap("expression");
         // TODO 运算指令生成
         if (SYM_PLUS.equals(symbol) || SYM_SUB.equals(symbol)) {
+            appendChild(token.getId());
             putInstruction(new Instruction(LIT, 0, 0)); // 如果以-/+开头，栈中补0
-            advanced();
+            advance();
         }
         entry();
         while (SYM_PLUS.equals(symbol) || SYM_SUB.equals(symbol)) {
-            advanced();
+            addSub();
+            advance();
             entry();
         }
+        node = node.parent;
     }
 
     private void entry() {
+        swap("entry");
         // TODO 运算指令生成
         if (SYM_IDENT.equals(symbol) || SYM_NUMBER.equals(symbol) || SYM_LEFT_BRACKETS.equals(symbol)) {
             factor();
             while (SYM_MUL.equals(symbol) || SYM_DIV.equals(symbol)) {
-                advanced();
+                mulDiv();
+                advance();
                 factor();
             }
         } else {
             error();
         }
+        node = node.parent;
     }
 
     private void factor() {
+        swap("factor");
         // TODO 运算指令生成
         if (SYM_IDENT.equals(symbol)) {
-            advanced();
+            identity();
+            advance();
         } else if (SYM_NUMBER.equals(symbol)) {
-            advanced();
+            number();
+            advance();
         } else if (SYM_LEFT_BRACKETS.equals(symbol)) {
+            appendChild("(");
+            advance();
             expression();
             if (SYM_RIGHT_BRACKETS.equals(symbol)) {
-                advanced();
+                appendChild(")");
+                advance();
             } else {
                 error();
             }
         } else {
             error();
         }
+        node = node.parent;
     }
 
     private void conditionStatement() {
+        swap("conditionStatement");
         if (SYM_IF.equals(symbol)) {
-            advanced();
+            appendChild("if");
+            advance();
             condition();
             if (SYM_THEN.equals(symbol)) {
+                appendChild("then");
                 Instruction instruction = new Instruction(JPC, 0, 0); // JPC
                 putInstruction(instruction);
-                advanced();
+                advance();
                 statement();
                 instruction.setOffset(instructions.size()); // 地址回填
             } else {
@@ -400,29 +483,37 @@ public class SyntaxAnalyzer {
         } else {
             error();
         }
+        node = node.parent;
     }
 
     private void callStatement() {
+        swap("callStatement");
         if (SYM_CALL.equals(symbol)) {
-            advanced();
+            appendChild("call");
+            advance();
             if (SYM_IDENT.equals(symbol)) {
+                identity();
                 assertRef(token, RefType.PROCEDURE);
                 RefEntry entry = getRef(token);
                 putInstruction(new Instruction(CAL, level - entry.getLevel(), entry.getAdr()));// CAL
-                advanced();
+                advance();
             }
         }
+        node = node.parent;
     }
 
     private void whileStatement() {
+        swap("whileStatement");
         if (SYM_WHILE.equals(symbol)) {
+            appendChild("while");
             int startPoint = instructions.size(); // while语句起始指令地址
-            advanced();
+            advance();
             condition();
             Instruction instruction = new Instruction(JPC, 0, 0);
             putInstruction(instruction);
             if (SYM_DO.equals(symbol)) {
-                advanced();
+                appendChild("do");
+                advance();
                 statement();
                 putInstruction(new Instruction(JMP, 0, startPoint)); // JMP
                 instruction.setOffset(instructions.size());
@@ -432,31 +523,39 @@ public class SyntaxAnalyzer {
         } else {
             error();
         }
+        node = node.parent;
     }
 
     private void readStatement() {
+        swap("readStatement");
         if (SYM_READ.equals(symbol)) {
-            advanced();
+            appendChild("read");
+            advance();
             if (SYM_LEFT_BRACKETS.equals(symbol)) {
-                advanced();
+                appendChild("(");
+                advance();
                 if (SYM_IDENT.equals(symbol)) {
+                    identity();
                     assertRef(token, RefType.VARIABLE);
                     RefEntry entry = getRef(token);
                     putInstruction(new Instruction(OPR, 0, 16));
                     putInstruction(new Instruction(STO, level - entry.getLevel(), entry.getAdr()));
-                    advanced();
+                    advance();
                     while (SYM_COMMA.equals(symbol)) {
-                        advanced();
+                        appendChild(",");
+                        advance();
                         if (SYM_IDENT.equals(symbol)) {
+                            identity();
                             assertRef(token, RefType.VARIABLE);
                             entry = getRef(token);
                             putInstruction(new Instruction(OPR, 0, 16));
                             putInstruction(new Instruction(STO, level - entry.getLevel(), entry.getAdr()));
-                            advanced();
+                            advance();
                         }
                     }
                     if (SYM_RIGHT_BRACKETS.equals(symbol)) {
-                        advanced();
+                        appendChild(")");
+                        advance();
                     }
                 } else {
                     error();
@@ -467,13 +566,17 @@ public class SyntaxAnalyzer {
         } else {
             error();
         }
+        node = node.parent;
     }
 
     private void writeStatement() {
+        swap("writeStatement");
         if (SYM_WRITE.equals(symbol)) {
-            advanced();
+            appendChild("write");
+            advance();
             if (SYM_LEFT_BRACKETS.equals(symbol)) {
-                advanced();
+                appendChild("(");
+                advance();
                 inExpression = true;
                 expression();
                 inExpression = false;
@@ -481,7 +584,8 @@ public class SyntaxAnalyzer {
 
                 putInstruction(new Instruction(OPR, 0, 15)); // OPR 15 write
                 while (SYM_COMMA.equals(symbol)) {
-                    advanced();
+                    appendChild(",");
+                    advance();
                     inExpression = true;
                     expression();
                     inExpression = false;
@@ -489,7 +593,8 @@ public class SyntaxAnalyzer {
                     putInstruction(new Instruction(OPR, 0, 15)); // OPR 15 write
                 }
                 if (SYM_RIGHT_BRACKETS.equals(symbol)) {
-                    advanced();
+                    appendChild(")");
+                    advance();
                 } else {
                     error();
                 }
@@ -499,8 +604,49 @@ public class SyntaxAnalyzer {
         } else {
             error();
         }
+        node = node.parent;
     }
 
+    private void identity() {
+        swap("identity");
+        if (!SYM_IDENT.equals(symbol)) {
+            error();
+        }
+        appendChild(token.getId());
+        node = node.parent;
+    }
+
+    private void number() {
+        swap("number");
+        if (!SYM_NUMBER.equals(symbol)) {
+            error();
+        }
+        appendChild(token.getId());
+        node = node.parent;
+    }
+
+    private void addSub() {
+        swap("addSub");
+        // TODO
+        appendChild(token.getId());
+        node = node.parent;
+    }
+
+    /**
+     * 不起到检查作用，因为已经检查
+     */
+    private void mulDiv() {
+        swap("mulDiv");
+        // TODO
+        appendChild(token.getId());
+        node = node.parent;
+    }
+
+    private void relation() {
+        swap("relation");
+        appendChild(token.getId());
+        node = node.parent;
+    }
     /**
      * 出错处理
      */
@@ -635,6 +781,24 @@ public class SyntaxAnalyzer {
             throw new RuntimeException("Unsupported operator");
         }
 
+    }
+
+    /**
+     * 递归构造目录树之前的保存工作
+     * @param name
+     */
+    private void swap(String name) {
+        Node subNode = new Node(node, name);
+        this.node.appendChild(subNode);
+        this.node = subNode;
+    }
+
+    /**
+     * 追加子节点
+     * @param name
+     */
+    private void appendChild(String name) {
+        node.appendChild(new Node(node, name));
     }
 
 }

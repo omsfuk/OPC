@@ -59,9 +59,7 @@ public class Token {
     }
 
     public Token(Symbol symbol, int row, int col) {
-        this.symbol = symbol;
-        this.row = row;
-        this.col = col;
+        this(symbol, null, 0, row, col);
     }
 
     public Symbol getSymbol() {

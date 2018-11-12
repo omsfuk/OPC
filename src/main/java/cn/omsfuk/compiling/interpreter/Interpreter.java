@@ -1,12 +1,11 @@
-package cn.omsfuk.compiling;
+package cn.omsfuk.compiling.interpreter;
 
-import cn.omsfuk.compiling.analyzer.SyntaxAnalyzer;
-import cn.omsfuk.compiling.analyzer.TokenAnalyzer;
-import cn.omsfuk.compiling.exception.SyntaxErrorException;
+import cn.omsfuk.compiling.parser.SyntaxParser;
+import cn.omsfuk.compiling.parser.TokenParser;
 import cn.omsfuk.compiling.support.Instruction;
 import cn.omsfuk.compiling.support.Instruction.OP;
+import cn.omsfuk.compiling.support.SyntaxTreeGUI;
 
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,16 +28,9 @@ public class Interpreter {
 
     private int[] stack = new int[1024000];
 
+    private Scanner scanner = new Scanner(System.in);
 
-    private Scanner scanner;
-
-    public Interpreter(String filename) {
-
-    }
-
-    public Interpreter(File file) {
-
-    }
+    private boolean debugEnable;
 
     public Interpreter(List<Instruction> instructions, int pc) {
         this.instructions = instructions;
@@ -49,15 +41,20 @@ public class Interpreter {
         scanner = new Scanner(inputStream);
     }
 
+    public void setDebugEnable(boolean debugEnable) {
+        this.debugEnable = debugEnable;
+    }
+
     public void exec() {
-        int maxSp = 0;
+        Instruction instruction;
         do {
-            Instruction instruction = instructions.get(pc);
+            instruction = instructions.get(pc);
+            if (debugEnable) {
+                System.out.println(String.format("%-4s: %s", pc, instruction));
+            }
             pc ++;
             dispatch(instruction);
-            maxSp = sp > maxSp ? sp : maxSp;
         } while (sp != 0);
-        System.out.println("MaxSP: " + maxSp);
     }
 
     private void dispatch(Instruction instruction) {
@@ -174,14 +171,11 @@ public class Interpreter {
     }
 
     public static void main(String[] args) throws IOException {
-        TokenAnalyzer tokenAnalyzer = new TokenAnalyzer(new FileInputStream("program.fuk"));
-        SyntaxAnalyzer analyzer = new SyntaxAnalyzer(tokenAnalyzer);
-        analyzer.analyse();
-        // analyzer.getInstructions().forEach(System.out::println);
-        Interpreter interpreter = new Interpreter(analyzer.getInstructions(), analyzer.getStartPointer());
-        interpreter.setInputStream(new FileInputStream("input.txt"));
-        interpreter.exec();
+        TokenParser tokenParser = new TokenParser(
+                new FileInputStream("program.ofk"));
+        SyntaxParser syntaxParser = new SyntaxParser(tokenParser);
+        syntaxParser.parse();
+
+        new SyntaxTreeGUI(syntaxParser.getSyntaxTree()).build();
     }
-
 }
-
